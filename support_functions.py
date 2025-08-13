@@ -6,7 +6,7 @@
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import List, Tuple, Optional, Iterable
+from typing import List, Iterable
 import math
 import re
 from colorama import init, Fore, Style
@@ -97,18 +97,18 @@ def print_instruction_color() -> None:
             Fore.YELLOW + "Поддерживаемые версии 1С:", 
             [
                 "1) Управление производственным предприятием (1С 8.3):",
-                "   - Заголовки: |Дата|Документ|Операция|\n",
+                "   - Заголовки карточки: |Дата|Документ|Операция|\n",
                 "2) Бухгалтерия предприятия, ERP Агропромышленный комплекс,",
                 "   ERP Управление предприятием 2:",
-                "   - Заголовки: |Период|Документ|Аналитика Дт|Аналитика Кт|\n"
+                "   - Заголовки карточки: |Период|Документ|Аналитика Дт|Аналитика Кт|\n"
             ]
         ),
         (
             Fore.YELLOW + "Особенности:", 
             [
-                "- Результаты сохраняются на листах UPP и Non_UPP",
-                "- Файлы >1 млн строк разбиваются на части",
-                "- Время обработки: 500 тыс. строк ~ 2 мин\n"
+                "- Результаты пакетной обработки сохраняются на листах UPP и Non_UPP",
+                "- Таблицы >1 млн строк разбиваются на части",
+                "- Ожидаемое время обработки: 500 тыс. строк ~ 2 мин\n"
             ]
         )
     ]
@@ -159,6 +159,10 @@ def fix_1c_excel_case(file_path: Path) -> BytesIO:
 
 def normalize_path(path_str) -> Path:
     # Если path_str — объект Path, преобразуем в строку
-    path_str = str(path_str)
-    normalized_str = path_str.replace('\\', '/').replace('-', '—')
-    return Path(normalized_str)
+    if path_str.exists():
+        return path_str
+    else:
+        path_str = str(path_str)
+        normalized_str = path_str.replace('\\', '/').replace('-', '—')
+        return Path(normalized_str)
+    #end

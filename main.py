@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import shlex
 from abc import ABC, abstractmethod
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -85,7 +85,9 @@ class UPPFileProcessor(FileProcessor):
         )
         
         df['Дата'] = df['Дата'].ffill()
+        df['Документ'] = df['Документ'].infer_objects()
         df['Документ'] = df['Документ'].ffill()
+        
 
         
         
@@ -192,7 +194,7 @@ class UPPFileProcessor(FileProcessor):
             else:
                 new_columns.append(col)
         result.columns = new_columns
-        result.to_excel('001.xlsx')
+
         # Реорганизация колонок
         if 'Дата' in result.columns:
             result = result[['Дата'] + [col for col in result.columns if col != 'Дата']]
@@ -278,28 +280,34 @@ class NonUPPFileProcessor(FileProcessor):
         # Извлечение специальных данных
         df_count = self._extract_special_data(df, 'Кол.', ['Дебет_количество', 'Кредит_количество'])
         df_currency = self._extract_special_data(df, 'Вал.', ['Дебет_валюта', 'Дебет_валютное_количество', 'Кредит_валюта', 'Кредит_валютное_количество'])
-        
+        # df.to_excel('00009.xlsx')
         # Фильтрация по дате
         df['Период'] = pd.to_datetime(df['Период'], format='%d.%m.%Y', errors='coerce')
         df = df[df['Период'].notna()].copy().reset_index(drop=True)
         
+        # df.to_excel('00010.xlsx')
         # Добавление извлеченных данных
         if not df_count.empty and len(df_count) == len(df):
             df = pd.concat([df, df_count], axis=1)
         if not df_currency.empty and len(df_currency) == len(df):
             df = pd.concat([df, df_currency], axis=1)
-        
+        # df.to_excel('00011.xlsx')
         # Обработка колонок
         for col in ['Документ', 'Аналитика Дт', 'Аналитика Кт']:
-            self._split_and_expand(df, col, col.split()[0])
+            self._split_and_expand(df, col, col)
+            # self._split_and_expand(df, col, col.split()[0])
         cols = df.columns.tolist()
+        # df.to_excel('00012.xlsx')
+        # print('cols', cols)
         new_columns = [
-            f'{cols[i - 1]}_значение' if pd.isna(col) or col == '' and i > 0 
-            else ('NoNameCol0' if i == 0 else col)
-            for i, col in enumerate(df.columns)
-        ]
-        df.columns = new_columns
+                        f'{cols[i - 1]}_значение' if (pd.isna(col) or col == '') and i > 0 
+                        else col
+                        for i, col in enumerate(df.columns)
+                    ]
         
+        
+        df.columns = new_columns
+        # df.to_excel('00013.xlsx')
         df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
         df.insert(0, 'Имя_файла', os.path.basename(file_path))
         
@@ -340,6 +348,7 @@ class FileHandler:
     
     def handle_input(self, input_path: Path) -> None:
         if input_path.is_file():
+            print('Принят файл...', end='\r')
             self._process_single_file(input_path)
         elif input_path.is_dir():
             self._process_directory(input_path)
@@ -355,7 +364,7 @@ class FileHandler:
                 print('Файл в обработке...', end='\r')
             result = processor.process_file(file_path)
             self.storage_processed_registers[file_path.name] = result
-        except RegisterProcessingError as e:
+        except RegisterProcessingError:
             self.not_correct_files.append(file_path.name)
     
     def _process_directory(self, dir_path: Path) -> None:
@@ -367,7 +376,7 @@ class FileHandler:
             upp_results = []
             non_upp_results = []
 
-            for file_path in tqdm(excel_files, desc="Обработка файлов"):
+            for file_path in tqdm(excel_files, leave=False, desc="Обработка файлов"):
                 try:
                     processor = self.processor_factory.get_processor(file_path)
                     result = processor.process_file(file_path)
@@ -380,6 +389,7 @@ class FileHandler:
                     self.not_correct_files.append(file_path.name)
             
             # Обработка результатов
+            print('Упорядочиваем столбцы в своде...', end='\r')
             df_pivot_upp = sort_columns(
                 pd.concat(upp_results), 
                 DESIRED_ORDER['upp']
@@ -410,36 +420,42 @@ class FileHandler:
             
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             temp_filename = tmp.name
-
+        
+        if self.verbose:
+            print('Сохраняем файл...   ', end='\r')
         with pd.ExcelWriter(temp_filename, engine='openpyxl') as writer:
             for sheet_name, df in self.storage_processed_registers.items():
                 safe_name = sheet_name[:31]
                 df.to_excel(writer, sheet_name=safe_name, index=False)
-        
+        if self.verbose:
+            print('Открываем файл...   ', end='\r')
         if sys.platform == "win32":
             os.startfile(temp_filename)
         elif sys.platform == "darwin":
             subprocess.run(["open", temp_filename])
         else:
             subprocess.run(["xdg-open", temp_filename])
+        if self.verbose:
+            print('Обработка завершена.   ')
 
     @staticmethod
     def _save_combined_results(df_upp: pd.DataFrame, df_non_upp: pd.DataFrame) -> None:
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             temp_filename = tmp.name
-
+        print('Сохраняем свод в файле...         ', end='\r')
         with pd.ExcelWriter(temp_filename, engine='openpyxl') as writer:
             if not df_upp.empty:
                 write_df_in_chunks(writer, df_upp, 'UPP')
             if not df_non_upp.empty:
                 write_df_in_chunks(writer, df_non_upp, 'Non_UPP')
-        
+        print('Открываем сводный файл...          ', end='\r')
         if sys.platform == "win32":
             os.startfile(temp_filename)
         elif sys.platform == "darwin":
             subprocess.run(["open", temp_filename])
         else:
             subprocess.run(["xdg-open", temp_filename])
+        print('Обработка завершена.               ')
 
 class UserInterface:
     @staticmethod
@@ -464,8 +480,8 @@ def main():
                 try:
                     file_handler.handle_input(normalize_path(input_path))
                 except Exception as e:
-                    import traceback
-                    traceback.print_exc()
+                    # import traceback
+                    # traceback.print_exc()
                     print(f"{e}")
                     if input_path.is_file():
                         file_handler.not_correct_files.append(input_path.name)
@@ -476,11 +492,13 @@ def main():
             print("\nПрограмма прервана пользователем.")
             break
         except Exception as e:
+            # import traceback
+            # traceback.print_exc()
             print(f"{e}")
         finally:
             # Вывод информации о неправильных файлах
             if file_handler.not_correct_files:
-                print(Fore.RED + 'Файлы не распознаны как Карточки счета 1С:')
+                print(Fore.RED + 'Файлы не распознаны как Карточки счета 1С или возникли ошибки:')
                 for file_name in file_handler.not_correct_files:
                     print(Fore.RED + f"  - {file_name}")
                 file_handler.not_correct_files.clear()
@@ -491,3 +509,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    #end
